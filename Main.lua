@@ -164,7 +164,7 @@ _G.WhiskiUI={
 
 print("WhiskiUI v2.0 GUI loaded")
 -- ============================================
--- ЧАСТЬ 2: REMOTESPY (FIXED)
+-- ЧАСТЬ 2: REMOTESPY (FIXED VIA __NAMECALL)
 -- ============================================
 local RemoteSpy = {}
 local RemoteLogs = {}
@@ -172,10 +172,10 @@ local RemoteCounter = 0
 local MaxLogs = 100
 local BlockedRemotes = {}
 
--- Рекурсивная сериализация ТАБЛИЦ
+-- Рекурсивная сериализация таблиц
 local function SerializeTable(tbl, depth)
     depth = depth or 0
-    if depth > 3 then return "{ ... }" end
+    if depth > 3 then return "{...}" end
     local str = "{"
     for k, v in pairs(tbl) do
         local kt = type(k)
@@ -220,38 +220,38 @@ local function SerializeArgs(...)
     return str
 end
 
--- Генерация кода для ре-файра
-local function GenerateReFireCode(remoteName, argsString)
+local function GenerateReFireCode(remoteName, argsString, isFunction)
+    local callType = isFunction and "InvokeServer" or "FireServer"
     return string.format([[
 local remote = game:GetService("ReplicatedStorage"):FindFirstChild("%s", true)
 if remote then
-    remote:FireServer(%s)
-    print("Re-Fired: %s")
+    local result = remote:%s(%s)
+    print("Re-Fired: %s, result:", result)
 else
     warn("Remote not found: %s")
 end
-]], remoteName, argsString, remoteName, remoteName)
+]], remoteName, callType, argsString, remoteName, remoteName)
 end
 
--- Функция создания модалки перед перехватом
-local function ShowRemoteModal(remote, remoteName, argsString, ...)
+-- Функция создания модалки
+local function ShowRemoteModal(remote, remoteName, argsString, isFunction, response, ...)
     local args = {...}
     
-    -- Затемнённый фон 40%
+    -- Затемнённый фон 40% поверх всего меню
     local overlay = Instance.new("Frame")
     overlay.Size = UDim2.new(1, 0, 1, 0)
     overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     overlay.BackgroundTransparency = 0.4
-    overlay.ZIndex = 20
+    overlay.ZIndex = 30
     overlay.Parent = main
     
-    -- Окно модалки
+    -- Окно модалки (закруглено 12px)
     local modal = Instance.new("Frame")
-    modal.Size = UDim2.new(0, 340, 0, 200)
-    modal.Position = UDim2.new(0.5, -170, 0.5, -100)
+    modal.Size = UDim2.new(0, 340, 0, 240)
+    modal.Position = UDim2.new(0.5, -170, 0.5, -120)
     modal.BackgroundColor3 = Theme.BG
     modal.BorderSizePixel = 0
-    modal.ZIndex = 21
+    modal.ZIndex = 31
     modal.Parent = overlay
     Corner(modal, 12)
     Stroke(modal, Theme.Stroke, 1, 0.5)
@@ -261,7 +261,7 @@ local function ShowRemoteModal(remote, remoteName, argsString, ...)
     title.Size = UDim2.new(1, -20, 0, 30)
     title.Position = UDim2.new(0, 10, 0, 5)
     title.BackgroundTransparency = 1
-    title.Text = "RemoteEvent: " .. remoteName
+    title.Text = (isFunction and "RemoteFunction: " or "RemoteEvent: ") .. remoteName
     title.TextColor3 = Theme.Text
     title.TextSize = 12
     title.Font = Enum.Font.GothamBold
@@ -270,15 +270,29 @@ local function ShowRemoteModal(remote, remoteName, argsString, ...)
     
     -- Аргументы
     local argsLabel = Instance.new("TextLabel")
-    argsLabel.Size = UDim2.new(1, -20, 0, 60)
+    argsLabel.Size = UDim2.new(1, -20, 0, 50)
     argsLabel.Position = UDim2.new(0, 10, 0, 40)
     argsLabel.BackgroundTransparency = 1
-    argsLabel.Text = "Аргументы:\n" .. argsString:sub(1, 120)
+    argsLabel.Text = "Аргументы:\n" .. argsString:sub(1, 100)
     argsLabel.TextColor3 = Theme.Sub
     argsLabel.TextSize = 10
     argsLabel.Font = Enum.Font.Gotham
     argsLabel.TextXAlignment = Enum.TextXAlignment.Left
     argsLabel.Parent = modal
+    
+    -- Ответ сервера (для RemoteFunction)
+    if isFunction and response ~= nil then
+        local respLabel = Instance.new("TextLabel")
+        respLabel.Size = UDim2.new(1, -20, 0, 30)
+        respLabel.Position = UDim2.new(0, 10, 0, 95)
+        respLabel.BackgroundTransparency = 1
+        respLabel.Text = "Ответ сервера:\n" .. tostring(response)
+        respLabel.TextColor3 = Theme.Accent
+        respLabel.TextSize = 10
+        respLabel.Font = Enum.Font.Gotham
+        respLabel.TextXAlignment = Enum.TextXAlignment.Left
+        respLabel.Parent = modal
+    end
     
     -- Кнопка "Перехватить"
     local interceptBtn = Instance.new("TextButton")
@@ -292,26 +306,26 @@ local function ShowRemoteModal(remote, remoteName, argsString, ...)
     interceptBtn.Parent = modal
     Corner(interceptBtn, 6)
     interceptBtn.MouseButton1Click:Connect(function()
-        -- Запись в лог
         RemoteCounter = RemoteCounter + 1
         local entry = {
             id = RemoteCounter,
             name = remoteName,
             args = argsString,
             time = os.date("%H:%M:%S"),
-            type = "FireServer",
+            type = isFunction and "InvokeServer" or "FireServer",
+            response = response,
             fireFunc = function()
-                pcall(function()
+                if isFunction then
+                    return remote:InvokeServer(unpack(args))
+                else
                     remote:FireServer(unpack(args))
-                end)
+                end
             end,
-            code = GenerateReFireCode(remoteName, argsString)
+            code = GenerateReFireCode(remoteName, argsString, isFunction)
         }
         table.insert(RemoteLogs, entry)
         if #RemoteLogs > MaxLogs then table.remove(RemoteLogs, 1) end
         if RemoteSpy.UpdateUI then task.spawn(RemoteSpy.UpdateUI) end
-        
-        -- Вызов оригинала
         overlay:Destroy()
     end)
     
@@ -329,58 +343,57 @@ local function ShowRemoteModal(remote, remoteName, argsString, ...)
     blockBtn.MouseButton1Click:Connect(function()
         BlockedRemotes[remote] = true
         overlay:Destroy()
-        print("Remote заблокирован: " .. remoteName)
     end)
 end
 
 -- ============================================
--- ПЕРЕХВАТЧИК (работает через обход всех ремоутов)
+-- ПЕРЕХВАТЧИК ЧЕРЕЗ __NAMECALL (универсально)
 -- ============================================
 local function SetupSpy()
-    local function HookRemote(remote)
-        if remote:IsA("RemoteEvent") then
-            local oldFire = remote.FireServer
-            remote.FireServer = function(self, ...)
-                if BlockedRemotes[self] then return end
-                local args = {...}
-                local argsString = SerializeArgs(unpack(args))
-                local name = self.Name or "Unknown"
-                task.spawn(function()
-                    ShowRemoteModal(self, name, argsString, unpack(args))
-                end)
-                task.wait(0.1)
-                return oldFire(self, ...)
-            end
-        elseif remote:IsA("RemoteFunction") then
-            local oldInvoke = remote.InvokeServer
-            remote.InvokeServer = function(self, ...)
-                if BlockedRemotes[self] then return end
-                local args = {...}
-                local argsString = SerializeArgs(unpack(args))
-                local name = self.Name or "Unknown"
-                task.spawn(function()
-                    ShowRemoteModal(self, name, argsString, unpack(args))
-                end)
-                task.wait(0.1)
-                return oldInvoke(self, ...)
-            end
-        end
-    end
+    local mt = getrawmetatable(game)
+    if not mt then return end
+    local oldNamecall = mt.__namecall
     
-    -- Хук всех существующих ремоутов
-    for _, service in ipairs(game:GetDescendants()) do
-        if service:IsA("RemoteEvent") or service:IsA("RemoteFunction") then
-            pcall(HookRemote, service)
+    mt.__namecall = function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        -- Проверяем, что это RemoteEvent/RemoteFunction
+        if self and (self:IsA("RemoteEvent") or self:IsA("RemoteFunction")) then
+            local name = self.Name or "Unknown"
+            
+            -- FireServer (RemoteEvent)
+            if method == "FireServer" then
+                if BlockedRemotes[self] then return end
+                local argsString = SerializeArgs(unpack(args))
+                task.spawn(function()
+                    ShowRemoteModal(self, name, argsString, false, nil, unpack(args))
+                end)
+                task.wait(0.05)
+                return oldNamecall and oldNamecall(self, ...) or self[method](self, ...)
+            end
+            
+            -- InvokeServer (RemoteFunction)
+            if method == "InvokeServer" then
+                if BlockedRemotes[self] then return end
+                local argsString = SerializeArgs(unpack(args))
+                local response = nil
+                local success, result = pcall(function()
+                    return oldNamecall and oldNamecall(self, ...) or self[method](self, ...)
+                end)
+                if success then
+                    response = result
+                end
+                task.spawn(function()
+                    ShowRemoteModal(self, name, argsString, true, response, unpack(args))
+                end)
+                return response
+            end
         end
+        
+        -- Все остальные вызовы
+        return oldNamecall and oldNamecall(self, ...) or self[method](self, ...)
     end
-    
-    -- Хук новых ремоутов (при создании)
-    game.DescendantAdded:Connect(function(child)
-        if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
-            task.wait(0.5)
-            pcall(HookRemote, child)
-        end
-    end)
 end
 
 -- ============================================
@@ -391,12 +404,26 @@ local function BuildRemoteSpyPage()
         WhiskiUI:AddLabel("=== RemoteSpy ===")
         WhiskiUI:AddLabel("Перехват: ACTIVE | Блокировка: ON")
         
+        -- Фоновый фрейм для логов (закруглен 12px)
+        local logBg = Instance.new("Frame")
+        logBg.Size = UDim2.new(1, -20, 0, 280)
+        logBg.Position = UDim2.new(0, 10, 0, 50)
+        logBg.BackgroundColor3 = Theme.Surface
+        logBg.BackgroundTransparency = 0.6
+        logBg.BorderSizePixel = 0
+        logBg.ZIndex = 2
+        logBg.Parent = content
+        Corner(logBg, 12)
+        Stroke(logBg, Theme.Stroke, 1, 0.3)
+        
         local listFrame = Instance.new("ScrollingFrame")
-        listFrame.Size = UDim2.new(1, 0, 0, 280)
+        listFrame.Size = UDim2.new(1, -10, 1, -10)
+        listFrame.Position = UDim2.new(0, 5, 0, 5)
         listFrame.BackgroundTransparency = 1
         listFrame.BorderSizePixel = 0
         listFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-        listFrame.Parent = content
+        listFrame.ZIndex = 3
+        listFrame.Parent = logBg
         
         local listLayout = Instance.new("UIListLayout")
         listLayout.Padding = UDim.new(0, 6)
@@ -411,33 +438,33 @@ local function BuildRemoteSpyPage()
             end
             
             local count = #RemoteLogs
-            listFrame.CanvasSize = UDim2.new(0, 0, 0, count * 60 + 20)
+            listFrame.CanvasSize = UDim2.new(0, 0, 0, count * 55 + 20)
             
             local startIdx = math.max(1, count - 29)
             for i = startIdx, count do
                 local entry = RemoteLogs[i]
                 if entry then
                     local btn = Instance.new("TextButton")
-                    btn.Size = UDim2.new(1, -10, 0, 50)
+                    btn.Size = UDim2.new(1, -10, 0, 45)
                     btn.BackgroundColor3 = Theme.El
-                    btn.BackgroundTransparency = 0.4
-                    btn.Text = string.format("[%s] %s | %s", entry.time, entry.name, entry.args:sub(1, 30))
+                    btn.BackgroundTransparency = 0.5
+                    btn.Text = string.format("[%s] %s | %s", entry.time, entry.name, entry.args:sub(1, 25))
                     btn.TextColor3 = Theme.Text
-                    btn.TextSize = 10
+                    btn.TextSize = 9
                     btn.Font = Enum.Font.Gotham
                     btn.TextXAlignment = Enum.TextXAlignment.Left
                     btn.AutoButtonColor = false
-                    btn.ZIndex = 5
+                    btn.ZIndex = 4
                     btn.Parent = listFrame
                     Corner(btn, 6)
                     
                     btn.MouseButton1Click:Connect(function()
                         local detailFrame = Instance.new("Frame")
-                        detailFrame.Size = UDim2.new(0, 360, 0, 220)
-                        detailFrame.Position = UDim2.new(0.5, -180, 0.5, -110)
+                        detailFrame.Size = UDim2.new(0, 360, 0, 250)
+                        detailFrame.Position = UDim2.new(0.5, -180, 0.5, -125)
                         detailFrame.BackgroundColor3 = Theme.BG
                         detailFrame.BorderSizePixel = 0
-                        detailFrame.ZIndex = 10
+                        detailFrame.ZIndex = 20
                         detailFrame.Parent = main
                         Corner(detailFrame, 12)
                         Stroke(detailFrame, Theme.Stroke, 1, 0.5)
@@ -454,10 +481,11 @@ local function BuildRemoteSpyPage()
                         closeBtn.MouseButton1Click:Connect(function() detailFrame:Destroy() end)
                         
                         local info = Instance.new("TextLabel")
-                        info.Size = UDim2.new(1, -20, 0, 60)
+                        info.Size = UDim2.new(1, -20, 0, 90)
                         info.Position = UDim2.new(0, 10, 0, 30)
                         info.BackgroundTransparency = 1
-                        info.Text = string.format("Имя: %s\nАргументы:\n%s", entry.name, entry.args)
+                        local respText = entry.response and ("\nОтвет: " .. tostring(entry.response)) or ""
+                        info.Text = string.format("Имя: %s\nТип: %s\nАргументы:\n%s%s", entry.name, entry.type, entry.args, respText)
                         info.TextColor3 = Theme.Text
                         info.TextSize = 10
                         info.Font = Enum.Font.Gotham
@@ -510,7 +538,7 @@ local function BuildRemoteSpyPage()
         clearBtn.TextColor3 = Theme.Sub
         clearBtn.TextSize = 10
         clearBtn.Font = Enum.Font.GothamMedium
-        clearBtn.Parent = listFrame
+        clearBtn.Parent = logBg
         Corner(clearBtn, 6)
         clearBtn.MouseButton1Click:Connect(function()
             RemoteLogs = {}
@@ -536,4 +564,4 @@ if not pages["RemoteSpy"] then
     BuildRemoteSpyPage()
 end
 
-print("WhiskiUI v2.0 RemoteSpy (FIXED) loaded")
+print("WhiskiUI v2.0 RemoteSpy (FIXED via __namecall) loaded")
