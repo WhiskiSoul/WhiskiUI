@@ -164,18 +164,46 @@ _G.WhiskiUI={
 
 print("WhiskiUI v2.0 GUI loaded")
 -- ============================================
--- ЧАСТЬ 2: REMOTESPY МОДУЛЬ И ИНТЕГРАЦИЯ
+-- ЧАСТЬ 2: REMOTESPY (FIXED)
 -- ============================================
 local RemoteSpy = {}
 local RemoteLogs = {}
 local RemoteCounter = 0
 local MaxLogs = 100
+local BlockedRemotes = {}
+
+-- Рекурсивная сериализация ТАБЛИЦ
+local function SerializeTable(tbl, depth)
+    depth = depth or 0
+    if depth > 3 then return "{ ... }" end
+    local str = "{"
+    for k, v in pairs(tbl) do
+        local kt = type(k)
+        local vt = type(v)
+        local ks = (kt == "string") and string.format("%q", k) or tostring(k)
+        local vs = ""
+        if vt == "string" then
+            vs = string.format("%q", v)
+        elseif vt == "number" or vt == "boolean" then
+            vs = tostring(v)
+        elseif vt == "table" then
+            vs = SerializeTable(v, depth + 1)
+        elseif vt == "Instance" then
+            vs = v.ClassName
+        else
+            vs = tostring(v)
+        end
+        str = str .. "[" .. ks .. "]=" .. vs .. ","
+    end
+    str = str .. "}"
+    return str
+end
 
 local function SerializeArgs(...)
     local args = {...}
     local str = ""
     for i, v in ipairs(args) do
-        local t = typeof(v)
+        local t = type(v)
         if t == "string" then
             str = str .. string.format("%q", v)
         elseif t == "number" or t == "boolean" then
@@ -183,7 +211,7 @@ local function SerializeArgs(...)
         elseif t == "Instance" then
             str = str .. string.format("game:GetService('%s')", v.ClassName)
         elseif t == "table" then
-            str = str .. "{ ... }"
+            str = str .. SerializeTable(v)
         else
             str = str .. tostring(v)
         end
@@ -192,6 +220,7 @@ local function SerializeArgs(...)
     return str
 end
 
+-- Генерация кода для ре-файра
 local function GenerateReFireCode(remoteName, argsString)
     return string.format([[
 local remote = game:GetService("ReplicatedStorage"):FindFirstChild("%s", true)
@@ -204,77 +233,163 @@ end
 ]], remoteName, argsString, remoteName, remoteName)
 end
 
-local oldFireServer = nil
-local oldInvokeServer = nil
-
-local function SetupSpy()
-    local mt = getrawmetatable(game)
-    if mt and mt.__index then
-        oldFireServer = mt.__index.FireServer
-        oldInvokeServer = mt.__index.InvokeServer
+-- Функция создания модалки перед перехватом
+local function ShowRemoteModal(remote, remoteName, argsString, ...)
+    local args = {...}
+    
+    -- Затемнённый фон 40%
+    local overlay = Instance.new("Frame")
+    overlay.Size = UDim2.new(1, 0, 1, 0)
+    overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    overlay.BackgroundTransparency = 0.4
+    overlay.ZIndex = 20
+    overlay.Parent = main
+    
+    -- Окно модалки
+    local modal = Instance.new("Frame")
+    modal.Size = UDim2.new(0, 340, 0, 200)
+    modal.Position = UDim2.new(0.5, -170, 0.5, -100)
+    modal.BackgroundColor3 = Theme.BG
+    modal.BorderSizePixel = 0
+    modal.ZIndex = 21
+    modal.Parent = overlay
+    Corner(modal, 12)
+    Stroke(modal, Theme.Stroke, 1, 0.5)
+    
+    -- Заголовок
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 0, 30)
+    title.Position = UDim2.new(0, 10, 0, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "RemoteEvent: " .. remoteName
+    title.TextColor3 = Theme.Text
+    title.TextSize = 12
+    title.Font = Enum.Font.GothamBold
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = modal
+    
+    -- Аргументы
+    local argsLabel = Instance.new("TextLabel")
+    argsLabel.Size = UDim2.new(1, -20, 0, 60)
+    argsLabel.Position = UDim2.new(0, 10, 0, 40)
+    argsLabel.BackgroundTransparency = 1
+    argsLabel.Text = "Аргументы:\n" .. argsString:sub(1, 120)
+    argsLabel.TextColor3 = Theme.Sub
+    argsLabel.TextSize = 10
+    argsLabel.Font = Enum.Font.Gotham
+    argsLabel.TextXAlignment = Enum.TextXAlignment.Left
+    argsLabel.Parent = modal
+    
+    -- Кнопка "Перехватить"
+    local interceptBtn = Instance.new("TextButton")
+    interceptBtn.Size = UDim2.new(0, 130, 0, 32)
+    interceptBtn.Position = UDim2.new(0.5, -140, 1, -45)
+    interceptBtn.BackgroundColor3 = Theme.Accent
+    interceptBtn.Text = "Перехватить"
+    interceptBtn.TextColor3 = Theme.Text
+    interceptBtn.TextSize = 11
+    interceptBtn.Font = Enum.Font.GothamBold
+    interceptBtn.Parent = modal
+    Corner(interceptBtn, 6)
+    interceptBtn.MouseButton1Click:Connect(function()
+        -- Запись в лог
+        RemoteCounter = RemoteCounter + 1
+        local entry = {
+            id = RemoteCounter,
+            name = remoteName,
+            args = argsString,
+            time = os.date("%H:%M:%S"),
+            type = "FireServer",
+            fireFunc = function()
+                pcall(function()
+                    remote:FireServer(unpack(args))
+                end)
+            end,
+            code = GenerateReFireCode(remoteName, argsString)
+        }
+        table.insert(RemoteLogs, entry)
+        if #RemoteLogs > MaxLogs then table.remove(RemoteLogs, 1) end
+        if RemoteSpy.UpdateUI then task.spawn(RemoteSpy.UpdateUI) end
         
-        mt.__index.FireServer = function(self, ...)
-            local args = {...}
-            local remoteName = self.Name or "Unknown"
-            local argsString = SerializeArgs(unpack(args))
-            local timestamp = os.date("%H:%M:%S")
-            
-            RemoteCounter = RemoteCounter + 1
-            local entry = {
-                id = RemoteCounter,
-                name = remoteName,
-                args = argsString,
-                time = timestamp,
-                type = "FireServer",
-                fireFunc = function()
-                    self:FireServer(unpack(args))
-                end,
-                code = GenerateReFireCode(remoteName, argsString)
-            }
-            table.insert(RemoteLogs, entry)
-            if #RemoteLogs > MaxLogs then table.remove(RemoteLogs, 1) end
-            
-            if RemoteSpy.UpdateUI then
-                task.spawn(RemoteSpy.UpdateUI)
-            end
-            
-            return oldFireServer(self, ...)
-        end
-        
-        mt.__index.InvokeServer = function(self, ...)
-            local args = {...}
-            local remoteName = self.Name or "Unknown"
-            local argsString = SerializeArgs(unpack(args))
-            local timestamp = os.date("%H:%M:%S")
-            
-            RemoteCounter = RemoteCounter + 1
-            local entry = {
-                id = RemoteCounter,
-                name = remoteName,
-                args = argsString,
-                time = timestamp,
-                type = "InvokeServer",
-                fireFunc = function()
-                    self:InvokeServer(unpack(args))
-                end,
-                code = GenerateReFireCode(remoteName, argsString)
-            }
-            table.insert(RemoteLogs, entry)
-            if #RemoteLogs > MaxLogs then table.remove(RemoteLogs, 1) end
-            
-            if RemoteSpy.UpdateUI then
-                task.spawn(RemoteSpy.UpdateUI)
-            end
-            
-            return oldInvokeServer(self, ...)
-        end
-    end
+        -- Вызов оригинала
+        overlay:Destroy()
+    end)
+    
+    -- Кнопка "Заблокировать"
+    local blockBtn = Instance.new("TextButton")
+    blockBtn.Size = UDim2.new(0, 130, 0, 32)
+    blockBtn.Position = UDim2.new(0.5, 10, 1, -45)
+    blockBtn.BackgroundColor3 = Theme.Stroke
+    blockBtn.Text = "Заблокировать"
+    blockBtn.TextColor3 = Theme.Sub
+    blockBtn.TextSize = 11
+    blockBtn.Font = Enum.Font.GothamBold
+    blockBtn.Parent = modal
+    Corner(blockBtn, 6)
+    blockBtn.MouseButton1Click:Connect(function()
+        BlockedRemotes[remote] = true
+        overlay:Destroy()
+        print("Remote заблокирован: " .. remoteName)
+    end)
 end
 
+-- ============================================
+-- ПЕРЕХВАТЧИК (работает через обход всех ремоутов)
+-- ============================================
+local function SetupSpy()
+    local function HookRemote(remote)
+        if remote:IsA("RemoteEvent") then
+            local oldFire = remote.FireServer
+            remote.FireServer = function(self, ...)
+                if BlockedRemotes[self] then return end
+                local args = {...}
+                local argsString = SerializeArgs(unpack(args))
+                local name = self.Name or "Unknown"
+                task.spawn(function()
+                    ShowRemoteModal(self, name, argsString, unpack(args))
+                end)
+                task.wait(0.1)
+                return oldFire(self, ...)
+            end
+        elseif remote:IsA("RemoteFunction") then
+            local oldInvoke = remote.InvokeServer
+            remote.InvokeServer = function(self, ...)
+                if BlockedRemotes[self] then return end
+                local args = {...}
+                local argsString = SerializeArgs(unpack(args))
+                local name = self.Name or "Unknown"
+                task.spawn(function()
+                    ShowRemoteModal(self, name, argsString, unpack(args))
+                end)
+                task.wait(0.1)
+                return oldInvoke(self, ...)
+            end
+        end
+    end
+    
+    -- Хук всех существующих ремоутов
+    for _, service in ipairs(game:GetDescendants()) do
+        if service:IsA("RemoteEvent") or service:IsA("RemoteFunction") then
+            pcall(HookRemote, service)
+        end
+    end
+    
+    -- Хук новых ремоутов (при создании)
+    game.DescendantAdded:Connect(function(child)
+        if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then
+            task.wait(0.5)
+            pcall(HookRemote, child)
+        end
+    end)
+end
+
+-- ============================================
+-- GUI СТРАНИЦА REMOTESPY
+-- ============================================
 local function BuildRemoteSpyPage()
     local page = CreatePage("RemoteSpy", function()
         WhiskiUI:AddLabel("=== RemoteSpy ===")
-        WhiskiUI:AddLabel("Перехват: ACTIVE")
+        WhiskiUI:AddLabel("Перехват: ACTIVE | Блокировка: ON")
         
         local listFrame = Instance.new("ScrollingFrame")
         listFrame.Size = UDim2.new(1, 0, 0, 280)
@@ -339,12 +454,12 @@ local function BuildRemoteSpyPage()
                         closeBtn.MouseButton1Click:Connect(function() detailFrame:Destroy() end)
                         
                         local info = Instance.new("TextLabel")
-                        info.Size = UDim2.new(1, -20, 0, 50)
+                        info.Size = UDim2.new(1, -20, 0, 60)
                         info.Position = UDim2.new(0, 10, 0, 30)
                         info.BackgroundTransparency = 1
-                        info.Text = string.format("Имя: %s\nАргументы: %s", entry.name, entry.args)
+                        info.Text = string.format("Имя: %s\nАргументы:\n%s", entry.name, entry.args)
                         info.TextColor3 = Theme.Text
-                        info.TextSize = 11
+                        info.TextSize = 10
                         info.Font = Enum.Font.Gotham
                         info.TextXAlignment = Enum.TextXAlignment.Left
                         info.Parent = detailFrame
@@ -412,10 +527,13 @@ local function BuildRemoteSpyPage()
     end)
 end
 
+-- ============================================
+-- ЗАПУСК
+-- ============================================
 pcall(SetupSpy)
 
 if not pages["RemoteSpy"] then
     BuildRemoteSpyPage()
 end
 
-print("WhiskiUI v2.0 RemoteSpy loaded")
+print("WhiskiUI v2.0 RemoteSpy (FIXED) loaded")
