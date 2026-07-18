@@ -1,3 +1,4 @@
+--AYAYAUSJSK--
 return function(player)
     local Players = game:GetService("Players")
     local ReplicatedStorage = game:GetService("ReplicatedStorage")
